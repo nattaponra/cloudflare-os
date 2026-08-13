@@ -7,6 +7,7 @@ import {
   AiGatewayInfo,
   AiModelProvider,
   SUGGESTED_MODELS,
+  CodexProviderStatus,
 } from '@gadgets/workshop-shared/api'
 import {
   Plus,
@@ -16,6 +17,7 @@ import {
   DotsThreeVertical,
 } from '@phosphor-icons/react'
 import AddModelModal from '../AddModelModal'
+import CodexProviderCard from '../CodexProviderCard'
 import { useDocumentTitle } from '../useDocumentTitle'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from '../components/menuStyles'
 
@@ -143,18 +145,24 @@ function ProvidersPage() {
   const [loadError, setLoadError] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [codexStatus, setCodexStatus] = useState<CodexProviderStatus>({
+    available: false, connected: false,
+  })
+  const [codexConnecting, setCodexConnecting] = useState(false)
 
   const fetchAll = async () => {
     setLoadError(false)
     try {
-      const [modelList, qm, cfg] = await Promise.all([
+      const [modelList, qm, cfg, codex] = await Promise.all([
         authenticatedApi.listModels(),
         authenticatedApi.getQuickModel(),
         authenticatedApi.getAiConfig(),
+        authenticatedApi.getCodexProviderStatus(),
       ])
       setModels(modelList)
       setQuickModel(qm)
       setAiConfig(cfg)
+      setCodexStatus(codex)
     } catch (err) {
       console.error('Failed to load providers:', err)
       setLoadError(true)
@@ -165,9 +173,22 @@ function ProvidersPage() {
 
   useEffect(() => { fetchAll() }, [authenticatedApi])
 
+  // Device authorization finishes in another tab. Poll only while a connection is pending or
+  // disconnected, then stop as soon as the account appears.
+  useEffect(() => {
+    if (!codexStatus.available || codexStatus.connected || !codexConnecting) return
+    const timer = window.setInterval(() => { void fetchAll() }, 4_000)
+    return () => window.clearInterval(timer)
+  }, [codexStatus.available, codexStatus.connected, codexConnecting, authenticatedApi])
+
+  useEffect(() => {
+    if (codexStatus.connected) setCodexConnecting(false)
+  }, [codexStatus.connected])
+
   const gatewayMode = aiConfig?.enabled === true
 
   const isBuiltIn = (modelId: string): boolean => {
+    if (modelId.startsWith('openai-codex:')) return true
     if (!aiConfig?.enabled) return false
     const enabled = new Set((aiConfig as Extract<AiGatewayInfo, { enabled: true }>).enabledProviders)
     return PROVIDER_ORDER.some((p) => enabled.has(p) && modelId in SUGGESTED_MODELS[p])
@@ -244,6 +265,40 @@ function ProvidersPage() {
       )}
 
       <div className="chat-panel flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pt-1 pb-16">
+        {!loading && !loadError && (
+          <CodexProviderCard
+            status={codexStatus}
+            onConnect={async () => {
+              const popup = window.open('about:blank', '_blank')
+              if (!popup) throw new Error('Popup blocked')
+              popup.opener = null
+              try {
+                const { url } = await authenticatedApi.connectAccount('codex')
+                const target = new URL(url, window.location.href)
+                if (target.origin !== window.location.origin ||
+                    !target.pathname.startsWith('/gatekeeper/codex/')) {
+                  throw new Error('Invalid Codex connection URL')
+                }
+                popup.location.href = target.href
+                setCodexConnecting(true)
+              } catch (error) { popup.close(); throw error }
+            }}
+            onReconnect={async (accountId) => {
+              const popup = window.open('about:blank', '_blank')
+              if (!popup) throw new Error('Popup blocked')
+              popup.opener = null
+              try {
+                const { url } = await authenticatedApi.reconnectAccount(accountId)
+                popup.location.href = url
+              } catch (error) { popup.close(); throw error }
+            }}
+            onRefresh={async () => { await authenticatedApi.refreshCodexModels(); await fetchAll() }}
+            onDisconnect={async (accountId) => {
+              await authenticatedApi.disconnectAccount(accountId)
+              await fetchAll()
+            }}
+          />
+        )}
         {/* Notices */}
         {(gatewayMode || (!gatewayMode && models.length > 0)) && !loading && !loadError && (
           <div className="flex flex-col gap-2.5 px-3 pb-2">
@@ -329,10 +384,12 @@ function ProvidersPage() {
         onCancel={() => setSheetOpen(false)}
         onSuccess={() => {
           setSheetOpen(false)
+          if (codexStatus.available && !codexStatus.connected) setCodexConnecting(true)
           fetchAll()
         }}
         authenticatedApi={authenticatedApi}
         aiConfig={aiConfig}
+        codexAvailable={codexStatus.available}
       />
     </div>
   )

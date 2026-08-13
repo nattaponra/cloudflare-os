@@ -10,13 +10,16 @@ interface AddModelModalProps {
   onSuccess: () => void
   authenticatedApi: RpcStub<AuthenticatedApi>
   aiConfig: AiGatewayInfo | null
+  codexAvailable?: boolean
 }
 
+type ApiTokenProvider = Exclude<AiModelProvider, 'openai-codex'>
 type SelectionType =
-  | { type: 'suggested', provider: AiModelProvider, modelId: string, displayName: string }
-  | { type: 'custom', provider: AiModelProvider }
+  | { type: 'suggested', provider: ApiTokenProvider, modelId: string, displayName: string }
+  | { type: 'custom', provider: ApiTokenProvider }
+  | { type: 'codex' }
 
-const PROVIDER_LABELS: Record<AiModelProvider, string> = {
+const PROVIDER_LABELS: Record<ApiTokenProvider, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   google: 'Google',
@@ -25,7 +28,7 @@ const PROVIDER_LABELS: Record<AiModelProvider, string> = {
 }
 
 // Placeholder hinting at the shape of each provider's API token.
-const API_TOKEN_PLACEHOLDERS: Record<AiModelProvider, string> = {
+const API_TOKEN_PLACEHOLDERS: Record<ApiTokenProvider, string> = {
   anthropic: 'sk-ant-...',
   openai: 'sk-...',
   google: 'AIza...',
@@ -38,32 +41,37 @@ const API_TOKEN_PLACEHOLDERS: Record<AiModelProvider, string> = {
 const FALLBACK_EXAMPLE_MODEL = { modelId: 'gemma4:31b', name: 'Gemma 4 31B' }
 
 // Pick an example model to show in the custom-model placeholders for the given provider.
-function exampleModel(provider: AiModelProvider): { modelId: string, name: string } {
+function exampleModel(provider: ApiTokenProvider): { modelId: string, name: string } {
   const first = Object.entries(SUGGESTED_MODELS[provider])[0]
   return first ? { modelId: first[0], name: first[1].name } : FALLBACK_EXAMPLE_MODEL
 }
 
 // Encode a selection into a string value for the Select component.
-function encodeSelection(provider: AiModelProvider, modelId?: string): string {
+function encodeSelection(provider: ApiTokenProvider, modelId?: string): string {
   return modelId ? `${provider}:${modelId}` : `other-${provider}`
 }
 
 // Decode a Select value back into a SelectionType.
 function decodeSelection(value: string): SelectionType {
+  if (value === 'openai-codex') return { type: 'codex' }
   if (value.startsWith('other-')) {
-    return { type: 'custom', provider: value.substring(6) as AiModelProvider }
+    return { type: 'custom', provider: value.substring(6) as ApiTokenProvider }
   }
   const colonIndex = value.indexOf(':')
-  const provider = value.substring(0, colonIndex) as AiModelProvider
+  const provider = value.substring(0, colonIndex) as ApiTokenProvider
   const modelId = value.substring(colonIndex + 1)
   const displayName = SUGGESTED_MODELS[provider][modelId].name
   return { type: 'suggested', provider, modelId, displayName }
 }
 
 // Build the flat list of options for the Select dropdown.
-function buildOptions(gatewayMode: boolean, enabledProviders: Set<string> | null) {
+function buildOptions(gatewayMode: boolean, enabledProviders: Set<string> | null, codexAvailable: boolean) {
   const options: { value: string; label: string; provider: string }[] = []
-  const providerOrder = Object.keys(SUGGESTED_MODELS) as AiModelProvider[]
+  if (codexAvailable) {
+    options.push({ value: 'openai-codex', label: 'ChatGPT / Codex subscription', provider: 'openai-codex' })
+  }
+  const providerOrder = (Object.keys(SUGGESTED_MODELS) as AiModelProvider[])
+    .filter((provider): provider is ApiTokenProvider => provider !== 'openai-codex')
 
   for (const provider of providerOrder) {
     if (enabledProviders && !enabledProviders.has(provider)) continue
@@ -89,7 +97,7 @@ function buildOptions(gatewayMode: boolean, enabledProviders: Set<string> | null
   return options
 }
 
-export default function AddModelModal({ visible, onCancel, onSuccess, authenticatedApi, aiConfig }: AddModelModalProps) {
+export default function AddModelModal({ visible, onCancel, onSuccess, authenticatedApi, aiConfig, codexAvailable = false }: AddModelModalProps) {
   const toasts = useKumoToastManager()
 
   const [loading, setLoading] = useState(false)
@@ -135,7 +143,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
     const sel = decodeSelection(value)
     setSelection(sel)
 
-    if (sel.type === 'custom') {
+    if (sel.type === 'custom' || sel.type === 'codex') {
       setModelId('')
       setDisplayName('')
     } else {
@@ -144,7 +152,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
     }
     setApiToken('')
     setAccountId('')
-    setApiUrl(sel.provider === 'ollama' ? 'http://localhost:11434' : '')
+    setApiUrl(sel.type !== 'codex' && sel.provider === 'ollama' ? 'http://localhost:11434' : '')
   }
 
   const validate = (): boolean => {
@@ -159,8 +167,8 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
       if (!displayName.trim()) newErrors.displayName = 'Please enter a display name'
     }
 
-    const isOllama = selection?.provider === 'ollama'
-    const isCloudflare = selection?.provider === 'cloudflare'
+    const isOllama = selection?.type !== 'codex' && selection?.provider === 'ollama'
+    const isCloudflare = selection?.type !== 'codex' && selection?.provider === 'cloudflare'
     const showCredentials = !gatewayMode
 
     if (showCredentials && selection && !isOllama && !apiToken.trim()) {
@@ -181,6 +189,34 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
 
   const handleSubmit = async () => {
     if (!validate()) return
+
+    if (selection?.type === 'codex') {
+      const popup = window.open('about:blank', '_blank')
+      if (!popup) {
+        toasts.add({ title: 'Allow popups to connect ChatGPT / Codex', variant: 'error' })
+        return
+      }
+      popup.opener = null
+      setLoading(true)
+      try {
+        const { url } = await authenticatedApi.connectAccount('codex')
+        const target = new URL(url, window.location.href)
+        if (target.origin !== window.location.origin ||
+            !target.pathname.startsWith('/gatekeeper/codex/')) {
+          throw new Error('Invalid Codex connection URL')
+        }
+        popup.location.href = target.href
+        toasts.add({ title: 'Finish connecting in the OpenAI window', variant: 'success' })
+        onSuccess()
+      } catch (error) {
+        popup.close()
+        console.error('Failed to connect Codex:', error)
+        toasts.add({ title: 'Failed to start ChatGPT / Codex connection', variant: 'error' })
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
 
     setLoading(true)
     try {
@@ -213,11 +249,11 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
     }
   }
 
-  const options = buildOptions(gatewayMode, enabledProviders)
+  const options = buildOptions(gatewayMode, enabledProviders, codexAvailable)
   const showCustomFields = selection?.type === 'custom'
-  const example = selection ? exampleModel(selection.provider) : null
-  const isOllama = selection?.provider === 'ollama'
-  const isCloudflare = selection?.provider === 'cloudflare'
+  const example = selection && selection.type !== 'codex' ? exampleModel(selection.provider) : null
+  const isOllama = selection?.type !== 'codex' && selection?.provider === 'ollama'
+  const isCloudflare = selection?.type !== 'codex' && selection?.provider === 'cloudflare'
   const showCredentials = !gatewayMode
 
   // Group options by provider for rendering with visual separators.
@@ -258,7 +294,9 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
                   <div className="h-px bg-kumo-line my-1 mx-2" />
                 )}
                 <div className="px-3 py-1.5 text-xs font-medium text-kumo-subtle select-none">
-                  {PROVIDER_LABELS[group.provider as AiModelProvider] || group.provider}
+                  {group.provider === 'openai-codex'
+                    ? 'ChatGPT subscription'
+                    : PROVIDER_LABELS[group.provider as ApiTokenProvider] || group.provider}
                 </div>
                 {group.items.map(opt => (
                   <Select.Option key={opt.value} value={opt.value}>
@@ -268,6 +306,13 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
               </div>
             ))}
           </Select>
+
+          {selection?.type === 'codex' && (
+            <div className="rounded-xl border border-kumo-line bg-kumo-tint px-4 py-3 text-[13px] leading-[18px] text-kumo-subtle">
+              Connect with OpenAI's device login. Models are loaded from your account's live Codex
+              catalog and requests use your ChatGPT subscription quota. No API key is required.
+            </div>
+          )}
 
           {/* Custom model fields */}
           {showCustomFields && (
@@ -308,7 +353,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
           )}
 
           {/* API Token */}
-          {showCredentials && selection && (
+          {showCredentials && selection && selection.type !== 'codex' && (
             <SensitiveInput
               label="API Token"
               placeholder={API_TOKEN_PLACEHOLDERS[selection.provider]}
@@ -340,7 +385,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
           )}
 
           {/* Advanced Settings for non-Ollama, non-Cloudflare providers */}
-          {showCredentials && selection && !isOllama && !isCloudflare && (
+          {showCredentials && selection && selection.type !== 'codex' && !isOllama && !isCloudflare && (
             <Collapsible.Root
               open={advancedOpen}
               onOpenChange={setAdvancedOpen}
@@ -372,7 +417,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
             loading={loading}
             disabled={!selection}
           >
-            Add Model
+            {selection?.type === 'codex' ? 'Connect' : 'Add Model'}
           </Button>
         </div>
       </Dialog>
