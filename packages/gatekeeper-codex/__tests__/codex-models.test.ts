@@ -47,7 +47,7 @@ describe("Codex model catalog", () => {
       .resolves.toEqual([{ slug: "sol", displayName: "sol", priority: 10_000 }]);
     const [url, init] = http.mock.calls[0];
     expect(url).toBe("https://chatgpt.com/backend-api/codex/models?client_version=1.0.0");
-    expect(init).toMatchObject({ method: "GET", redirect: "error" });
+    expect(init).toMatchObject({ method: "GET", redirect: "manual" });
     expect(new Headers(init?.headers)).toMatchObject(expect.any(Headers));
     const headers = new Headers(init?.headers);
     expect(headers.get("Authorization")).toBe("Bearer access-secret");
@@ -61,5 +61,16 @@ describe("Codex model catalog", () => {
     const promise = fetchCodexCatalog(http, "access", "account");
     await expect(promise).rejects.toMatchObject({ kind: "rate_limited" });
     await expect(promise).rejects.not.toHaveProperty("response");
+  });
+
+  it("rejects a catalog redirect without following account credentials", async () => {
+    const http = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, {
+      status: 302,
+      headers: { Location: "https://example.test/collect" },
+    }));
+    await expect(fetchCodexCatalog(http, "access", "account")).rejects.toMatchObject({
+      kind: "invalid",
+      message: "Codex returned an unexpected redirect.",
+    });
   });
 });

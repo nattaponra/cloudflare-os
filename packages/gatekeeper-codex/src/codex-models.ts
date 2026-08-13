@@ -104,11 +104,14 @@ export async function fetchCodexCatalog(
         "User-Agent": CODEX_USER_AGENT,
         Accept: "application/json",
       },
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     });
   } catch (cause) {
     throw new CodexAuthError("transient", "Codex model discovery is temporarily unavailable.", { cause });
+  }
+  if (response.status >= 300 && response.status < 400) {
+    throw new CodexAuthError("invalid", "Codex returned an unexpected redirect.");
   }
   if (!response.ok) throw catalogFailure(response);
   return parseCodexCatalog(await catalogJson(response));

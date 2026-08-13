@@ -38,7 +38,7 @@ describe("Codex constrained proxy", () => {
       "X-Request-Marker": "preserved",
     });
     const authenticated = makeAuthenticatedCodexRequest(incoming, "real-token", "real-account");
-    expect(authenticated.redirect).toBe("error");
+    expect(authenticated.redirect).toBe("manual");
     expect(authenticated.headers.get("Authorization")).toBe("Bearer real-token");
     expect(authenticated.headers.get("ChatGPT-Account-Id")).toBe("real-account");
     expect(authenticated.headers.get("originator")).toBe("codex_cli_rs");
@@ -81,5 +81,15 @@ describe("Codex constrained proxy", () => {
     const credentials = credentialStub();
     await expect(proxyCodexResponse(http, responseRequest(), credentials)).resolves.toBe(upstream);
     expect(credentials.forceRefresh).not.toHaveBeenCalled();
+  });
+
+  it("rejects an inference redirect without forwarding credentials", async () => {
+    const http = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, {
+      status: 307,
+      headers: { Location: "https://example.test/collect" },
+    }));
+    await expect(proxyCodexResponse(http, responseRequest(), credentialStub()))
+      .rejects.toThrow("Codex returned an unexpected redirect.");
+    expect(http).toHaveBeenCalledOnce();
   });
 });

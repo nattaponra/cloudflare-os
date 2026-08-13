@@ -37,7 +37,13 @@ export function makeAuthenticatedCodexRequest(
   headers.set("ChatGPT-Account-Id", accountId);
   headers.set("originator", "codex_cli_rs");
   headers.set("User-Agent", CODEX_USER_AGENT);
-  return new Request(incoming, { headers, redirect: "error" });
+  return new Request(incoming, { headers, redirect: "manual" });
+}
+
+function rejectRedirect(response: Response): void {
+  if (response.status >= 300 && response.status < 400) {
+    throw new CodexAuthError("invalid", "Codex returned an unexpected redirect.");
+  }
 }
 
 export async function proxyCodexResponse(
@@ -51,10 +57,12 @@ export async function proxyCodexResponse(
   const replay = incoming.clone() as Request;
   const current = await credentials.accessToken();
   const first = await http(makeAuthenticatedCodexRequest(incoming, current.token, current.accountId));
+  rejectRedirect(first);
   if (first.status !== 401) return first;
 
   const refreshed = await credentials.forceRefresh();
   const second = await http(makeAuthenticatedCodexRequest(replay, refreshed.token, refreshed.accountId));
+  rejectRedirect(second);
   if (second.status !== 401) return second;
 
   await credentials.expired();
