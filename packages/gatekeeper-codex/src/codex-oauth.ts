@@ -6,6 +6,7 @@ import {
   type DevicePollResult,
   type OAuthTokens,
 } from "./codex-types";
+import { codexLogger } from "./observability";
 
 export type CodexHttp = typeof fetch;
 export type Sleep = (milliseconds: number) => Promise<void>;
@@ -100,8 +101,17 @@ async function post(
   init: RequestInit,
 ): Promise<Response> {
   try {
-    return await http(url, { ...init, redirect: "error" });
+    const response = await http(url, { ...init, redirect: "manual" });
+    if (response.status >= 300 && response.status < 400) {
+      throw new CodexAuthError("invalid", "OpenAI returned an unexpected redirect.");
+    }
+    return response;
   } catch (cause) {
+    if (cause instanceof CodexAuthError) throw cause;
+    codexLogger.warn("OAuth request failed", {
+      event: "codex.oauth.request.failed",
+      error: cause,
+    });
     throw new CodexAuthError("transient", "OpenAI is temporarily unavailable.", { cause });
   }
 }

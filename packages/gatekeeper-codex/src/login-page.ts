@@ -82,6 +82,9 @@ export function deviceLoginPage(options: {
         if (result.status === "complete") {
           status.textContent = "Connected. You may close this window.";
           window.close();
+          window.setTimeout(() => {
+            if (!window.closed) window.location.replace("/");
+          }, 250);
           return;
         }
         if (result.status === "error") {

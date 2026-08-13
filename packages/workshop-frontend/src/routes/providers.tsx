@@ -18,6 +18,7 @@ import {
 } from '@phosphor-icons/react'
 import AddModelModal from '../AddModelModal'
 import CodexProviderCard from '../CodexProviderCard'
+import { launchCodexConnection } from '../codexConnection'
 import { useDocumentTitle } from '../useDocumentTitle'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from '../components/menuStyles'
 
@@ -269,28 +270,11 @@ function ProvidersPage() {
           <CodexProviderCard
             status={codexStatus}
             onConnect={async () => {
-              const popup = window.open('about:blank', '_blank')
-              if (!popup) throw new Error('Popup blocked')
-              popup.opener = null
-              try {
-                const { url } = await authenticatedApi.connectAccount('codex')
-                const target = new URL(url, window.location.href)
-                if (target.origin !== window.location.origin ||
-                    !target.pathname.startsWith('/gatekeeper/codex/')) {
-                  throw new Error('Invalid Codex connection URL')
-                }
-                popup.location.href = target.href
-                setCodexConnecting(true)
-              } catch (error) { popup.close(); throw error }
+              await launchCodexConnection(() => authenticatedApi.connectAccount('codex'))
+              setCodexConnecting(true)
             }}
             onReconnect={async (accountId) => {
-              const popup = window.open('about:blank', '_blank')
-              if (!popup) throw new Error('Popup blocked')
-              popup.opener = null
-              try {
-                const { url } = await authenticatedApi.reconnectAccount(accountId)
-                popup.location.href = url
-              } catch (error) { popup.close(); throw error }
+              await launchCodexConnection(() => authenticatedApi.reconnectAccount(accountId))
             }}
             onRefresh={async () => { await authenticatedApi.refreshCodexModels(); await fetchAll() }}
             onDisconnect={async (accountId) => {

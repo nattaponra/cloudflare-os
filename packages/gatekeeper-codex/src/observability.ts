@@ -4,6 +4,7 @@ export type CodexLogFields = {
   retryAfterSeconds?: number;
   accountRecordId?: number;
   modelSlug?: string;
+  error?: unknown;
 };
 
 export const codexLogger = {

@@ -22,7 +22,7 @@ describe("Codex device login page", () => {
     expect(html).toContain("3000");
   });
 
-  it("does not load third-party scripts and closes only after success", async () => {
+  it("closes a popup or returns a same-tab fallback to the app after success", async () => {
     const html = await deviceLoginPage({
       userCode: "ABCD-EFGH",
       pollUrl: "/account/id/poll?nonce=x",
@@ -30,6 +30,7 @@ describe("Codex device login page", () => {
     }).text();
     expect(html).not.toMatch(/<script[^>]+src=/);
     expect(html).toContain("window.close()");
+    expect(html).toContain('window.location.replace("/")');
     expect(html).toContain('result.status === "complete"');
     expect(html).toContain("Waiting for approval");
   });

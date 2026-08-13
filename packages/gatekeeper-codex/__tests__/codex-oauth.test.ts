@@ -35,7 +35,7 @@ describe("Codex OAuth", () => {
     });
     const [url, init] = http.mock.calls[0];
     expect(url).toBe("https://auth.openai.com/api/accounts/deviceauth/usercode");
-    expect(init).toMatchObject({ method: "POST", redirect: "error" });
+    expect(init).toMatchObject({ method: "POST", redirect: "manual" });
     expect(JSON.parse(String(init?.body))).toEqual({
       client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
     });
@@ -62,6 +62,17 @@ describe("Codex OAuth", () => {
     await expect(requestDeviceAuthorization(http, async () => {})).rejects.toMatchObject({
       kind: "invalid",
       message: "OpenAI returned an invalid device authorization response.",
+    });
+  });
+
+  it("rejects OAuth redirects instead of following credentials to another origin", async () => {
+    const http = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, {
+      status: 302,
+      headers: { Location: "https://example.test/collect" },
+    }));
+    await expect(requestDeviceAuthorization(http, async () => {})).rejects.toMatchObject({
+      kind: "invalid",
+      message: "OpenAI returned an unexpected redirect.",
     });
   });
 

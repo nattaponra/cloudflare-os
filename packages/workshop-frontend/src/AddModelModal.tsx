@@ -3,6 +3,7 @@ import { Dialog, Button, Input, Select, SensitiveInput, Collapsible, useKumoToas
 import { AiChatAuthorInfo, AiModelConfig, AiModelProvider, AiGatewayInfo, SUGGESTED_MODELS } from '@gadgets/workshop-shared/api'
 import { RpcStub } from 'capnweb'
 import { AuthenticatedApi } from '@gadgets/workshop-shared/api'
+import { launchCodexConnection } from './codexConnection'
 
 interface AddModelModalProps {
   visible: boolean
@@ -188,28 +189,13 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
   }
 
   const handleSubmit = async () => {
-    if (!validate()) return
-
     if (selection?.type === 'codex') {
-      const popup = window.open('about:blank', '_blank')
-      if (!popup) {
-        toasts.add({ title: 'Allow popups to connect ChatGPT / Codex', variant: 'error' })
-        return
-      }
-      popup.opener = null
       setLoading(true)
       try {
-        const { url } = await authenticatedApi.connectAccount('codex')
-        const target = new URL(url, window.location.href)
-        if (target.origin !== window.location.origin ||
-            !target.pathname.startsWith('/gatekeeper/codex/')) {
-          throw new Error('Invalid Codex connection URL')
-        }
-        popup.location.href = target.href
+        await launchCodexConnection(() => authenticatedApi.connectAccount('codex'))
         toasts.add({ title: 'Finish connecting in the OpenAI window', variant: 'success' })
         onSuccess('openai-codex')
       } catch (error) {
-        popup.close()
         console.error('Failed to connect Codex:', error)
         toasts.add({ title: 'Failed to start ChatGPT / Codex connection', variant: 'error' })
       } finally {
@@ -217,6 +203,8 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
       }
       return
     }
+
+    if (!validate()) return
 
     setLoading(true)
     try {

@@ -132,7 +132,7 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
   ): Promise<{ url: string }> {
     const id = this.ctx.exports.UserAccount.newUniqueId();
     const nonce = newNonce();
-    this.ctx.exports.UserAccount.get(id).setCallback(callback, nonce);
+    await this.ctx.exports.UserAccount.get(id).setCallback(callback, nonce);
     return { url: `${baseUrl(this.env)}/${id.toString()}/${nonce}` };
   }
   async getSupportedResources(): Promise<SupportedResource[]> { return []; }
