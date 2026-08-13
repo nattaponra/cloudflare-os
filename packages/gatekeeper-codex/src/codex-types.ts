@@ -25,3 +25,20 @@ export type CodexClaims = {
   expiresAt: number;
   displayName?: string;
 };
+
+export type CodexModelDescriptor = {
+  slug: string;
+  displayName: string;
+  contextWindow?: number;
+  outputLimit?: number;
+  priority: number;
+};
+
+export type CodexCatalogErrorKind = "rate_limited" | "expired" | "invalid" | "transient";
+
+export type CodexCatalog = {
+  models: CodexModelDescriptor[];
+  stale: boolean;
+  lastUpdatedAt: number;
+  errorKind?: CodexCatalogErrorKind;
+};
