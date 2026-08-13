@@ -29,8 +29,8 @@ export function parseCodexCatalog(value: unknown): CodexModelDescriptor[] {
 
   const seen = new Set<string>();
   const models: CodexModelDescriptor[] = [];
-  for (const value of entries) {
-    const entry = record(value);
+  for (const candidate of entries) {
+    const entry = record(candidate);
     const slug = boundedString(entry?.slug);
     if (!entry || !slug || seen.has(slug)) continue;
     const visibility = typeof entry.visibility === "string" ? entry.visibility.trim().toLowerCase() : "";

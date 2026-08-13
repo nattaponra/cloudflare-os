@@ -741,8 +741,13 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
     // Resolve the quick model (used for lightweight tasks like title generation).
     if (gwConfig) {
-      // In AI Gateway mode, always use the hardcoded quick model.
-      result.quickModel = gwConfig.getQuickModelConfig();
+      // A user-selected Codex quick model must remain on the connected ChatGPT subscription even
+      // when the deployment also enables an AI Gateway for other providers.
+      const selectedQuick = this.storage.quickModel.get();
+      const codexQuick = selectedQuick && parseCodexProfileId(selectedQuick)
+        ? await this.#resolveModel(selectedQuick)
+        : undefined;
+      result.quickModel = codexQuick?.config ?? gwConfig.getQuickModelConfig();
     } else {
       let quickModelId = this.storage.quickModel.get();
       if (quickModelId) {

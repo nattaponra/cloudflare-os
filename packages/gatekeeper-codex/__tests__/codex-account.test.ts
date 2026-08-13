@@ -63,6 +63,21 @@ describe("Codex account lifecycle", () => {
     expect(storage.values.size).toBe(0);
   });
 
+  it("allows the same initiation link to retry after a transient device authorization failure", async () => {
+    const storage = new MemoryStorage();
+    const http = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("network unavailable"))
+      .mockResolvedValueOnce(Response.json({
+        user_code: "ABCD-EFGH", device_auth_id: "device-1", interval: 1,
+      }));
+    const account = new CodexAccountCore(storage, http, async () => {}, () => 1_000);
+    account.setCallback(callback(), "nonce-1");
+
+    await expect(account.beginDeviceFlow("nonce-1")).rejects.toMatchObject({ kind: "transient" });
+    await expect(account.beginDeviceFlow("nonce-1")).resolves.toMatchObject({ userCode: "ABCD-EFGH" });
+    expect(http).toHaveBeenCalledTimes(2);
+  });
+
   it("completes first connection only after a non-empty account catalog", async () => {
     const storage = new MemoryStorage();
     const http = vi.fn<typeof fetch>();

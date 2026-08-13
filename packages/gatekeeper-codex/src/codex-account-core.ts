@@ -128,7 +128,14 @@ export class CodexAccountCore {
 
       // Consume the initiation stage before the network request so a replay cannot start a second flow.
       this.storage.delete("login");
-      const authorization = await requestDeviceAuthorization(this.http, this.sleep);
+      let authorization: DeviceAuthorization;
+      try {
+        authorization = await requestDeviceAuthorization(this.http, this.sleep);
+      } catch (error) {
+        // A transient OpenAI failure must not burn the user's one-time Workshop link.
+        this.storage.put<LoginState>("login", state);
+        throw error;
+      }
       // The protocol helper owns its wall-clock expiry check. Keep that timestamp on the real
       // clock while the persisted stage uses the injectable account clock below.
       authorization.expiresAt = Date.now() + INITIATION_LIFETIME_MS;

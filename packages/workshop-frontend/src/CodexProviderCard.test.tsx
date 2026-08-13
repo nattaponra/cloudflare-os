@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import React, { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import CodexProviderCard from './CodexProviderCard'
@@ -18,13 +18,13 @@ async function render(status: Parameters<typeof CodexProviderCard>[0]['status'])
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
-  await act(async () => root!.render(<CodexProviderCard
-    status={status}
-    onConnect={vi.fn()}
-    onReconnect={vi.fn()}
-    onRefresh={vi.fn()}
-    onDisconnect={vi.fn()}
-  />))
+  await act(async () => root!.render(React.createElement(CodexProviderCard, {
+    status,
+    onConnect: vi.fn<() => Promise<void>>(),
+    onReconnect: vi.fn<(accountId: number) => Promise<void>>(),
+    onRefresh: vi.fn<() => Promise<void>>(),
+    onDisconnect: vi.fn<(accountId: number) => Promise<void>>(),
+  })))
   return container
 }
 
