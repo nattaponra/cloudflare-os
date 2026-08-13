@@ -6566,7 +6566,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
     }
 
     // Resolve the caller's profile and model.
-    let userContext = await caller.getExternalMessageChatContext(modelId);
+    let userContext = await caller.getExternalMessageChatContext(modelId) as unknown as UserChatContext;
 
     // The caller must have an available agent model.
     let aiModel = userContext.aiModel;
@@ -8209,7 +8209,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
   async newChat(initialMessage: string | SlashCommandRequest, chosenModelId: string | null,
                 capsules?: CapsuleSpecifier[], attachments?: ChatAttachmentHandle[],
                 formats?: MessageFormatRef[]): Promise<number> {
-    let userMeta = await this.#clientUser.getChatContext(chosenModelId);
+    let userMeta = await this.#clientUser.getChatContext(chosenModelId) as unknown as UserChatContext;
     return this.impl.newChat(this.#clientUser, userMeta, initialMessage, capsules, attachments,
                              undefined, undefined, formats);
   }
@@ -8218,7 +8218,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       chatId: number, message: string | SlashCommandRequest, chosenModelId: string | null,
       capsules?: CapsuleSpecifier[], attachments?: ChatAttachmentHandle[],
       formats?: MessageFormatRef[]): Promise<void> {
-    let userMeta = await this.#clientUser.getChatContext(chosenModelId);
+    let userMeta = await this.#clientUser.getChatContext(chosenModelId) as unknown as UserChatContext;
     return this.impl.sendChatMessage(
         this.#clientUser, userMeta, chatId, message, capsules, attachments, undefined, formats);
   }

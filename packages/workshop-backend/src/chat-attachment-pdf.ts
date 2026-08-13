@@ -28,6 +28,7 @@ export const PDF_MIME_TYPE = "application/pdf";
 /** Whether PDF attachments can reach this pi API (natively or via bridgePdfAttachments()). */
 export function modelApiSupportsPdfAttachments(api: Api): boolean {
   return api === "anthropic-messages" || api === "openai-responses" ||
+      api === "openai-codex-responses" ||
       api === "google-generative-ai";
 }
 
@@ -39,7 +40,8 @@ export function modelApiSupportsPdfAttachments(api: Api): boolean {
 export function bridgePdfAttachments(api: Api, payload: unknown): unknown | undefined {
   switch (api) {
     case "anthropic-messages": return bridgeAnthropicMessages(payload);
-    case "openai-responses": return bridgeOpenAiResponses(payload);
+    case "openai-responses":
+    case "openai-codex-responses": return bridgeOpenAiResponses(payload);
     default: return undefined;
   }
 }

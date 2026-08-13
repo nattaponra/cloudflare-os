@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AiChatAuthorInfo, AiModelConfig } from "@gadgets/workshop-shared/api";
 import { getModel, type ModelHandle } from "../src/ai-models.js";
 
@@ -68,6 +68,40 @@ async function captureRequest(handle: ModelHandle): Promise<CapturedRequest> {
 describe("getModel AI Gateway routing", () => {
   beforeEach(() => {
     capturedRequests.length = 0;
+  });
+
+  it("routes Codex through its account capability before either AI Gateway", async () => {
+    let captured: Request | undefined;
+    const account = {
+      fetch: vi.fn(async (request: Request) => {
+        captured = request;
+        return Response.json({ error: { message: "stubbed" } }, { status: 400 });
+      }),
+    };
+    const handle = getModel(env(), {
+      provider: "openai-codex",
+      model: "gpt-5.6-sol",
+      apiToken: "",
+      codexAccount: account,
+      resolvedContextWindow: 272_000,
+      resolvedOutputLimit: 32_000,
+    }, INITIATOR, {
+      userGateway: { accountId: "user-account", apiKey: "user-token" },
+    });
+    expect(handle.model.api).toBe("openai-codex-responses");
+    expect(handle.model.baseUrl).toBe("https://chatgpt.com/backend-api/codex");
+    expect(handle.model.contextWindow).toBe(272_000);
+    expect(handle.model.maxTokens).toBe(32_000);
+    expect(handle.aiGatewayLogRoute).toBeUndefined();
+
+    let payload: unknown;
+    const stream = handle.stream(handle.model, {
+      messages: [{ role: "user", content: "hello", timestamp: 0 }],
+    }, { fetch: fetchStub, maxRetries: 0, onPayload: (value) => { payload = value; } });
+    await stream.result();
+    expect(account.fetch).toHaveBeenCalledOnce();
+    expect(captured?.url).toBe("https://chatgpt.com/backend-api/codex/responses");
+    expect(payload).toMatchObject({ model: "gpt-5.6-sol", store: false });
   });
 
   it("routes non-Workers providers through the platform gateway", async () => {

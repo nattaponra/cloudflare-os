@@ -107,6 +107,13 @@ describe("compaction trigger", () => {
     })).toEqual({inputBudget: 1_000_000, maxOutputTokens: undefined});
   });
 
+  it("uses live Codex context and output limits", () => {
+    expect(getModelTokenLimits({
+      provider: "openai-codex", model: "gpt-5.6-sol", apiToken: "",
+      resolvedContextWindow: 272_000, resolvedOutputLimit: 32_000,
+    })).toEqual({inputBudget: 240_000, maxOutputTokens: 32_000});
+  });
+
   // Workers AI rejects a request whose prompt and response cap together exceed the window, so a
   // Cloudflare model configured by hand needs the reservation the model table can't declare for it.
   it("reserves Workers AI output capacity for a model the registry doesn't list", () => {

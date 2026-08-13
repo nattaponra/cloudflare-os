@@ -1,5 +1,5 @@
 import { RpcStub } from "capnweb";
-import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError, CodexProviderStatus } from '@gadgets/workshop-shared/api';
 import { Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { shouldAutoProvisionAccount, ambientGatekeeperMode } from "./provisioning-policy.js";
 import { CloudflareGatekeeperUser } from "@gadgets/workshop-shared/cloudflare-gatekeeper";
@@ -12,6 +12,11 @@ import type { AdminSettings } from "./admin-settings.js";
 import { isReservedBlueprintKey, readBlueprintKvRecord } from "./blueprint-archive.js";
 import { filterEnabledResources, isResourceDisabled, readAdminConfig } from "./admin-config.js";
 import { buildGatekeeperVendorMap } from "./auth/auth-vendors.js";
+import {
+  parseCodexProfileId,
+  resolveCodexModels,
+  type ResolvedAiModelConfig,
+} from "./codex-model-provider.js";
 
 const logger = createWorkshopLogger("workshop.user");
 
@@ -69,8 +74,8 @@ export type UserAiModelRecord = {
 
 export type UserChatContext = {
   profile: AiChatAuthorInfo;
-  aiModel?: UserAiModelRecord;
-  quickModel?: AiModelConfig;
+  aiModel?: { profile: AiChatAuthorInfo; config: ResolvedAiModelConfig };
+  quickModel?: ResolvedAiModelConfig;
 }
 
 type LoginSessionRecord = {
@@ -528,10 +533,17 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
         result.push(model.profile);
       }
     }
+    const codex = await this.#resolveCodexModels();
+    for (const profile of codex.profiles) {
+      if (!result.some((model) => model.id === profile.id)) result.push(profile);
+    }
     return result;
   }
 
   async addModel(profile: AiChatAuthorInfo, config: AiModelConfig): Promise<void> {
+    if (config.provider === "openai-codex") {
+      throw new Error("Codex models come from the connected ChatGPT account.");
+    }
     let gwConfig = getAiGatewayConfig(this.env);
     if (gwConfig && !gwConfig.providers.has(config.provider)) {
       throw new Error(`Provider "${config.provider}" is not available in AI Gateway mode.`);
@@ -556,14 +568,16 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   async setQuickModel(id: string | null): Promise<void> {
+    if (id !== null && !(await this.#resolveModel(id))) throw new Error(`No such model: ${id}`);
     this.storage.quickModel.put(id);
   }
 
   async getQuickModel(): Promise<null | string> {
     let result = this.storage.quickModel.get();
-    if (result && this.storage.aiModels.get(result)) {
+    if (result && await this.#resolveModel(result)) {
       return result;
     } else {
+      if (result) this.storage.quickModel.put(null);
       return null;
     }
   }
@@ -576,12 +590,47 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     if (id !== null) {
       // Validate that the model exists in the user's configured models or as a gateway model.
       let gwConfig = getAiGatewayConfig(this.env);
-      let exists = !!this.storage.aiModels.get(id) || !!gwConfig?.resolveModel(id);
+      let exists = !!this.storage.aiModels.get(id) || !!gwConfig?.resolveModel(id) ||
+        !!(await this.#resolveModel(id));
       if (!exists) {
         throw new Error(`No such model: ${id}`);
       }
     }
     this.storage.preferredModel.put(id);
+  }
+
+  async #resolveCodexModels(forceRefresh = false) {
+    const config = await readAdminConfig(this.env);
+    const available = this.vendors.has("codex") && !config.disabledGatekeepers.includes("codex");
+    return resolveCodexModels([...this.#connectedAccountRecords()].map((record) => ({
+      id: record.id,
+      account: record.account,
+      vendorId: record.vendorId,
+      credentialsValid: areCredentialsValid(record),
+    })), { forceRefresh, available });
+  }
+
+  async #resolveModel(id: string): Promise<UserAiModelRecord | undefined> {
+    const gwConfig = getAiGatewayConfig(this.env);
+    const gateway = gwConfig?.resolveModel(id);
+    if (gateway) return gateway;
+    const stored = this.storage.aiModels.get(id);
+    if (stored) return stored;
+    if (parseCodexProfileId(id)) {
+      const codex = await this.#resolveCodexModels();
+      const config = codex.resolved.get(id);
+      const profile = codex.profiles.find((candidate) => candidate.id === id);
+      if (config && profile) return { profile, config };
+    }
+    return undefined;
+  }
+
+  async getCodexProviderStatus(): Promise<CodexProviderStatus> {
+    return (await this.#resolveCodexModels()).status;
+  }
+
+  async refreshCodexModels(): Promise<CodexProviderStatus> {
+    return (await this.#resolveCodexModels(true)).status;
   }
 
   async isOnboardingCompleted(): Promise<boolean> {
@@ -677,8 +726,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       profile: this.storage.profile.get()
     };
     if (modelId) {
+      const dynamic = await this.#resolveModel(modelId);
       // In AI Gateway mode, resolve gateway models first.
-      if (gwConfig) {
+      if (dynamic) {
+        result.aiModel = dynamic;
+      } else if (gwConfig) {
         result.aiModel = gwConfig.resolveModel(modelId);
       }
       if (!result.aiModel) {
@@ -694,7 +746,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     } else {
       let quickModelId = this.storage.quickModel.get();
       if (quickModelId) {
-        let quickModel = this.storage.aiModels.get(quickModelId);
+        let quickModel = await this.#resolveModel(quickModelId);
         if (quickModel) {
           result.quickModel = quickModel.config;
         }
@@ -1495,6 +1547,14 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       // account + cached balance), which is meaningless without the underlying grant.
       if (account.vendorId === CLOUDFLARE_VENDOR_ID) {
         this.storage.cloudflareBilling.put(null);
+      }
+      if (account.vendorId === "codex") {
+        if (parseCodexProfileId(this.storage.quickModel.get() ?? "")) {
+          this.storage.quickModel.put(null);
+        }
+        if (parseCodexProfileId(this.storage.preferredModel.get() ?? "")) {
+          this.storage.preferredModel.put(null);
+        }
       }
       logger.info("account disconnected", {
         event: "account.disconnected",

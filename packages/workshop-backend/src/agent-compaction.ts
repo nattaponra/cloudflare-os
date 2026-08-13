@@ -1,9 +1,10 @@
-import {SUGGESTED_MODELS, WORKERS_AI_OUTPUT_LIMIT, type AiChatMessage, type AiModelConfig}
+import {SUGGESTED_MODELS, WORKERS_AI_OUTPUT_LIMIT, type AiChatMessage}
   from "@gadgets/workshop-shared/api";
 import type {Api, Message, Model} from "@earendil-works/pi-ai";
 import * as Y from "yjs";
 import type {ChatBindingEntry, CompactionCheckpoint} from "./agent";
 import {zeroUsage} from "./ai-invoke";
+import type {ResolvedAiModelConfig} from "./codex-model-provider";
 
 // Context compaction keeps long chats within the model's limit. It summarizes the messages before a
 // boundary and stores their replay state in a checkpoint. Canonical history keeps every message, so
@@ -23,13 +24,14 @@ const DEFAULT_CONTEXT_WINDOW = 128_000;
 // How the turn divides the model's window. The reserved response capacity is both withheld from the
 // prompt's budget and sent as the request's response cap. A Cloudflare model configured by hand has
 // no SUGGESTED_MODELS entry to declare its reservation, so the provider's applies.
-export function getModelTokenLimits(config: AiModelConfig):
+export function getModelTokenLimits(config: ResolvedAiModelConfig):
     {inputBudget: number, maxOutputTokens?: number} {
   let model = SUGGESTED_MODELS[config.provider][config.model];
-  let maxOutputTokens = model?.outputLimit ??
+  let maxOutputTokens = config.resolvedOutputLimit ?? model?.outputLimit ??
       (config.provider === "cloudflare" ? WORKERS_AI_OUTPUT_LIMIT : undefined);
   return {
-    inputBudget: (model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW) - (maxOutputTokens ?? 0),
+    inputBudget: (config.resolvedContextWindow ?? model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW) -
+      (maxOutputTokens ?? 0),
     maxOutputTokens,
   };
 }

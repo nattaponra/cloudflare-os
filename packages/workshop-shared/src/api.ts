@@ -353,6 +353,10 @@ export interface AuthenticatedApi extends RpcTarget {
   // are available. The frontend uses this to adjust the model management UI.
   getAiConfig(): Promise<AiGatewayInfo>;
 
+  // ChatGPT / Codex is account-backed and discovers the models that this user can actually use.
+  getCodexProviderStatus(): Promise<CodexProviderStatus>;
+  refreshCodexModels(): Promise<CodexProviderStatus>;
+
   // Resolve UI feature flags for the authenticated user.
   getUiFeatureFlags(): Promise<UiFeatureFlags>;
 
@@ -944,7 +948,22 @@ export type CloudflareAccountOption = {
 };
 
 // Supported AI providers.
-export type AiModelProvider = "openai" | "anthropic" | "google" | "cloudflare" | "ollama";
+export type AiModelProvider =
+  | "openai" | "openai-codex" | "anthropic" | "google" | "cloudflare" | "ollama";
+
+export type CodexProviderStatus =
+  | { available: false; connected: false }
+  | { available: true; connected: false }
+  | {
+      available: true;
+      connected: true;
+      accountId: number;
+      credentialsValid: boolean;
+      modelCount: number;
+      stale: boolean;
+      lastUpdatedAt: number;
+      errorKind?: "rate_limited" | "expired" | "invalid" | "transient";
+    };
 
 // Information about the AI gateway configuration. Returned by `AuthenticatedApi.getAiConfig()`.
 export type AiGatewayInfo = {
@@ -1007,6 +1026,7 @@ export const SUGGESTED_MODELS: Record<
     "gpt-5.6-luna": {name: "GPT 5.6 Luna", contextWindow: 1050000, outputLimit: 128000},
     "gpt-5.6-terra": {name: "GPT 5.6 Terra", contextWindow: 1050000, outputLimit: 128000},
   },
+  "openai-codex": {},
   "google": {
     "gemini-3.6-flash": {name: "Gemini 3.6 Flash", contextWindow: 1048576},
   },

@@ -8,6 +8,7 @@ import { stream as anthropicMessagesStream } from "@earendil-works/pi-ai/api/ant
 import { stream as googleGenerativeAiStream } from "@earendil-works/pi-ai/api/google-generative-ai";
 import { stream as openaiCompletionsStream } from "@earendil-works/pi-ai/api/openai-completions";
 import { stream as openaiResponsesStream } from "@earendil-works/pi-ai/api/openai-responses";
+import { stream as openaiCodexResponsesStream } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
 import { CLOUDFLARE_WORKERS_AI_MODELS } from "@earendil-works/pi-ai/providers/cloudflare-workers-ai.models";
 import { GOOGLE_MODELS } from "@earendil-works/pi-ai/providers/google.models";
@@ -20,6 +21,8 @@ import { AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, WORKERS_AI_OUTPUT_LI
 import { AiGatewayConfig, getAiGatewayConfig, type AiGatewayLogRoute } from "./ai-gateway.js";
 import { completeText } from "./ai-invoke.js";
 import { bridgePdfAttachments } from "./chat-attachment-pdf.js";
+import type { ResolvedAiModelConfig } from "./codex-model-provider.js";
+import { adaptCodexPayload, removeForeignEncryptedReasoning } from "./codex-request.js";
 
  // Routing to bill a user's own Cloudflare account for inference (BYOK path once the free tier is
  // exhausted). Defined here to avoid a backend->ai-gateway-billing type import cycle at runtime.
@@ -109,11 +112,18 @@ function buildMetadata(initiator: AiChatAuthorInfo, context?: GatewayMetadataCon
 const API_STREAMS: Record<string, StreamFunction<Api, SimpleStreamOptions>> = {
   "anthropic-messages": anthropicMessagesStream as StreamFunction<Api, SimpleStreamOptions>,
   "openai-responses": openaiResponsesStream as StreamFunction<Api, SimpleStreamOptions>,
+  "openai-codex-responses": openaiCodexResponsesStream as StreamFunction<Api, SimpleStreamOptions>,
   "openai-completions": openaiCompletionsStream as StreamFunction<Api, SimpleStreamOptions>,
   "google-generative-ai": googleGenerativeAiStream as StreamFunction<Api, SimpleStreamOptions>,
 };
 
 const ZERO_COST: ModelCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+// pi's Codex serializer requires a JWT-shaped value in order to construct headers. The connector
+// capability overwrites both headers before any network hop, so this contains no credential or
+// account identity and exists only to satisfy the serializer locally.
+const CODEX_CAPABILITY_TOKEN = `x.${btoa(JSON.stringify({
+  "https://api.openai.com/auth": { chatgpt_account_id: "capability" },
+}))}.x`;
 
 // Consult pi's builtin catalog for cost/compat metadata of a known model id. Unknown models are
 // fine (synthesized with zero cost). Import per-provider, not providers/all.
@@ -121,6 +131,7 @@ function catalogModel(provider: AiModelConfig["provider"], modelId: string): Mod
   switch (provider) {
     case "anthropic": return (ANTHROPIC_MODELS as Record<string, Model<Api>>)[modelId];
     case "openai": return (OPENAI_MODELS as Record<string, Model<Api>>)[modelId];
+    case "openai-codex": return undefined;
     case "google": return (GOOGLE_MODELS as Record<string, Model<Api>>)[modelId];
     case "cloudflare": return (CLOUDFLARE_WORKERS_AI_MODELS as Record<string, Model<Api>>)[modelId];
     case "ollama": return undefined;
@@ -131,12 +142,13 @@ function catalogModel(provider: AiModelConfig["provider"], modelId: string): Mod
 // Token limits for a synthesized model. SUGGESTED_MODELS remains authoritative (compaction
 // budgets in agent-compaction.ts are computed from it and must not change); pi's catalog fills
 // gaps for models we don't list, and unknown models get conservative defaults.
-function modelTokenWindow(config: AiModelConfig, catalog: Model<Api> | undefined)
+function modelTokenWindow(config: ResolvedAiModelConfig, catalog: Model<Api> | undefined)
     : { contextWindow: number, maxTokens: number } {
   const suggested = SUGGESTED_MODELS[config.provider]?.[config.model];
   return {
-    contextWindow: suggested?.contextWindow ?? catalog?.contextWindow ?? 128_000,
-    maxTokens: suggested?.outputLimit ??
+    contextWindow: config.resolvedContextWindow ?? suggested?.contextWindow ??
+      catalog?.contextWindow ?? 128_000,
+    maxTokens: config.resolvedOutputLimit ?? suggested?.outputLimit ??
         (config.provider === "cloudflare" ? WORKERS_AI_OUTPUT_LIMIT : undefined) ??
         catalog?.maxTokens ?? 4096,
   };
@@ -258,6 +270,9 @@ type HandleArgs = {
   gatewayMetadata?: GatewayMetadata;
   sessionAffinity?: string;
   aiGatewayLogRoute?: AiGatewayLogRoute;
+  fetch?: typeof fetch;
+  adaptCodex?: boolean;
+  forceSse?: boolean;
 };
 
 function makeHandle(args: HandleArgs): ModelHandle {
@@ -306,6 +321,8 @@ function makeHandle(args: HandleArgs): ModelHandle {
             ? apiExtras
             : args.model.api === "anthropic-messages" ? { thinkingEnabled: false } : {}),
         ...options,
+        ...(args.forceSse ? { transport: "sse" as const } : {}),
+        ...(args.fetch ? { fetch: args.fetch } : {}),
         ...(args.apiKey !== undefined ? { apiKey: args.apiKey } : {}),
         ...(Object.keys(headers).length > 0 ? { headers } : {}),
         // Session affinity: pi only sends it when caching isn't "none" (fine for us).
@@ -321,13 +338,15 @@ function makeHandle(args: HandleArgs): ModelHandle {
         // document blocks (no-op for payloads without one; see chat-attachment-pdf.ts).
         onPayload: async (payload, payloadModel) => {
           const replaced = await options.onPayload?.(payload, payloadModel);
-          return bridgePdfAttachments(args.model.api, replaced ?? payload) ?? replaced;
+          const bridged = bridgePdfAttachments(args.model.api, replaced ?? payload) ?? replaced ?? payload;
+          return args.adaptCodex ? adaptCodexPayload(bridged) : bridged;
         },
         // NOTE(binding-transport): pi passes `options.fetch` into its SDK clients on all paths.
         // If Workers-binding-backed inference returns (upstream ask filed), inject a
         // fetch-to-binding shim here and relax the token requirements in ai-gateway.ts.
       };
-      return streamFn(model, context, merged);
+      return streamFn(
+          model, args.adaptCodex ? removeForeignEncryptedReasoning(context) : context, merged);
     },
   };
   return handle;
@@ -339,9 +358,38 @@ function makeHandle(args: HandleArgs): ModelHandle {
  * access with the config's own credentials. The handle carries the matching AI Gateway log route
  * for cost accounting, when there is one.
  */
-export function getModel(env: Cloudflare.Env, config: AiModelConfig,
+export function getModel(env: Cloudflare.Env, config: ResolvedAiModelConfig,
                          initiator: AiChatAuthorInfo,
                          options: ModelRoutingOptions = {}): ModelHandle {
+  // Codex subscription credentials are held behind the account capability and must bypass both
+  // user-funded and platform Cloudflare AI Gateways.
+  if (config.provider === "openai-codex") {
+    if (!config.codexAccount) throw new Error("Reconnect ChatGPT / Codex before using this model.");
+    const window = modelTokenWindow(config, undefined);
+    return makeHandle({
+      model: {
+        id: config.model,
+        name: config.model,
+        api: "openai-codex-responses",
+        provider: "openai-codex",
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: ZERO_COST,
+        ...window,
+      },
+      apiKey: CODEX_CAPABILITY_TOKEN,
+      sessionAffinity: options.sessionAffinity,
+      adaptCodex: true,
+      forceSse: true,
+      fetch: async (input, init) => {
+        const request = input instanceof Request && init === undefined
+          ? input
+          : new Request(input, init);
+        return config.codexAccount!.fetch(request);
+      },
+    });
+  }
   // BYOK: a connected user's own Cloudflare account pays for everything (all providers, including
   // Workers AI), routed through the user's own AI Gateway with unified billing. Honored regardless
   // of whether a platform AI Gateway is configured, so connected users are always billed correctly.
@@ -610,6 +658,8 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
         apiKey: config.apiToken,
         sessionAffinity,
       });
+    case "openai-codex":
+      throw new Error("Codex subscription models must use their account capability.");
     default:
       config.provider satisfies never;
       throw new Error(`Unknown provider "${config.provider}".`);
