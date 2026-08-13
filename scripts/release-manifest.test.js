@@ -143,6 +143,14 @@ test("worker entries carry the deploy contract", () => {
       google.bindings.find((b) => b.name === "CLIENT_SECRET"),
       { type: "secret_text", name: "CLIENT_SECRET", text: "$SECRET(CLIENT_SECRET)" });
 
+  const codex = workers["gatekeeper-codex"];
+  assert.equal(codex.kind, "gatekeeper");
+  assert.equal(codex.shortName, "codex");
+  assert.equal(codex.vars.BASE_URL, "$PUBLIC_BASE_URL/gatekeeper/codex");
+  assert.equal(codex.installable, true);
+  assert.deepEqual(codex.inputs, []);
+  assert.ok(codex.migrations[0].new_sqlite_classes.includes("UserAccount"));
+
   // gatekeeper-email ships in the release but is not installable (needs Email Routing/a zone).
   assert.equal(workers["gatekeeper-email"].installable, false);
   assert.deepEqual(workers["gatekeeper-email"].inputs, []);

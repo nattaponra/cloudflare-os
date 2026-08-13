@@ -80,6 +80,46 @@
         "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/cloudflare"
       }
     },
+    "gatekeeper-codex": {
+      "bindings": [],
+      "compatibilityDate": "2026-02-02",
+      "compatibilityFlags": [
+        "allow_irrevocable_stub_storage",
+        "nodejs_als"
+      ],
+      "inputs": [],
+      "installable": true,
+      "kind": "gatekeeper",
+      "mainModule": "index.js",
+      "migrations": [
+        {
+          "new_sqlite_classes": [
+            "UserAccount"
+          ],
+          "tag": "v0"
+        }
+      ],
+      "modules": [
+        {
+          "name": "index.js",
+          "r2Key": "blobs/modules/3cbabd14c20feb46632fc7000624bf729ee2e95913b34c6c7f11a7a32b6927fb",
+          "sha256": "3cbabd14c20feb46632fc7000624bf729ee2e95913b34c6c7f11a7a32b6927fb",
+          "size": 70,
+          "type": "esm"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "invocation_logs": false
+        }
+      },
+      "shortName": "codex",
+      "vars": {
+        "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/codex"
+      }
+    },
     "gatekeeper-confluence": {
       "bindings": [
         {

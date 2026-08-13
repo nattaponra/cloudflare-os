@@ -41,6 +41,7 @@ const ARTIFACTS_CUT_ALLOWED = new Set(["gatekeeper-context"]);
 // Installable gatekeepers that do NOT take third-party OAuth app credentials; everyone else
 // defaults to CLIENT_ID/CLIENT_SECRET secret inputs (overridable via deploy-inputs.json).
 const NO_DEFAULT_CRED_INPUTS = new Set([
+  "gatekeeper-codex",         // OpenAI publishes the Codex device-flow client ID; no secret
   "gatekeeper-context",       // no third-party service; uses its own storage
   "gatekeeper-homeassistant", // users connect their own Home Assistant URL + token in-app
   "gatekeeper-scheduler",     // auto-provisioned; no third-party OAuth app
