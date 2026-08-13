@@ -16,12 +16,13 @@
 // to serving. Any source change (including dependency changes via pnpm-lock.yaml) flips the hash and
 // triggers a rebuild.
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDevServerConfig } from "./dev-server-config.js";
+import { startCodexRelay } from "./codex-relay.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const STAMP_PATH = join(ROOT, ".run-local-stamp");
@@ -148,12 +149,23 @@ if (needsBuild) {
 // ---------------------------------------------------------------------------
 
 console.log(`\nStarting local server at http://${backendHost} ...`);
+const backendPort = Number.parseInt(backendHost.split(":").at(-1), 10);
+const relayPort = Number.isSafeInteger(backendPort) ? backendPort + 1 : 8791;
+const relayToken = randomBytes(32).toString("hex");
+process.env.CODEX_RELAY_URL = `http://localhost:${relayPort}/v1/codex`;
+process.env.CODEX_RELAY_TOKEN = relayToken;
+const codexRelay = startCodexRelay({ token: relayToken, port: relayPort });
+codexRelay.on("error", error => {
+  console.error(`Codex relay failed: ${error.message}`);
+  process.exit(1);
+});
 const server = spawn(
     process.execPath,
     [join(ROOT, "run-dev-server.js"), "--serve-frontend-assets", ...passthroughArgs],
     { stdio: "inherit", cwd: ROOT });
 
 server.on("exit", (code, signal) => {
+  codexRelay.close();
   if (signal) process.kill(process.pid, signal);
   else process.exit(code ?? 0);
 });

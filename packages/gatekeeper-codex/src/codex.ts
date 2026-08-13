@@ -15,9 +15,14 @@ import type {
 import { CodexAccountCore, type CodexAccountStorage } from "./codex-account-core";
 import type { CodexCatalog } from "./codex-types";
 import { proxyCodexResponse } from "./codex-proxy";
+import { createCodexHttp } from "./codex-transport";
 import { deviceLoginPage, devicePollResponse } from "./login-page";
 
-type Env = Cloudflare.Env & { BASE_URL?: string };
+type Env = Cloudflare.Env & {
+  BASE_URL?: string;
+  CODEX_RELAY_URL?: string;
+  CODEX_RELAY_TOKEN?: string;
+};
 type GatekeeperUserProps = { userObjectId: string };
 
 function bytesHex(bytes: Uint8Array): string {
@@ -82,8 +87,15 @@ export class UserAccount extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.core = new CodexAccountCore(new DurableStorageAdapter(ctx.storage));
+    const http = createCodexHttp({
+      relayUrl: env.CODEX_RELAY_URL,
+      relayToken: env.CODEX_RELAY_TOKEN,
+    });
+    this.core = new CodexAccountCore(new DurableStorageAdapter(ctx.storage), http);
+    this.http = http;
   }
+
+  private readonly http: typeof fetch;
 
   setCallback(callback: Fetcher<GatekeeperConnectCallback>, nonce: string): void {
     this.core.setCallback(callback, nonce);
@@ -100,7 +112,7 @@ export class UserAccount extends DurableObject<Env> {
   }
   async proxy(request: Request): Promise<Response> {
     let staleToken: string | undefined;
-    return proxyCodexResponse(fetch, request, {
+    return proxyCodexResponse(this.http, request, {
       accessToken: async () => {
         const credential = await this.core.getUsableCredential();
         staleToken = credential.token;

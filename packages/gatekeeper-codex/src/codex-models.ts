@@ -1,5 +1,6 @@
 import { CODEX_BASE_URL, type CodexModelDescriptor } from "./codex-types";
 import { CodexAuthError, type CodexHttp } from "./codex-oauth";
+import { codexLogger } from "./observability";
 
 const MAX_CATALOG_BYTES = 512 * 1024;
 const MAX_TEXT_LENGTH = 256;
@@ -72,6 +73,10 @@ async function catalogJson(response: Response): Promise<unknown> {
 }
 
 function catalogFailure(response: Response): CodexAuthError {
+  codexLogger.warn("Model catalog request failed", {
+    event: "codex.catalog.request.failed",
+    status: response.status,
+  });
   if (response.status === 401 || response.status === 403) {
     return new CodexAuthError("expired", "Codex credentials need to be reconnected.");
   }
