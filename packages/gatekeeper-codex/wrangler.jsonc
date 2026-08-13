@@ -1,0 +1,16 @@
+{
+  "name": "gatekeeper-codex",
+  "main": ".wrangler/validate/src/codex.ts",
+  "build": {
+    "command": "pnpm exec capnweb-validate build --out .wrangler/validate",
+    "watch_dir": "src"
+  },
+  "compatibility_date": "2026-02-02",
+  "compatibility_flags": ["allow_irrevocable_stub_storage", "nodejs_als"],
+  "migrations": [{ "tag": "v0", "new_sqlite_classes": ["UserAccount"] }],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "invocation_logs": false }
+  }
+}

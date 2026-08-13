@@ -46,7 +46,9 @@ export async function proxyCodexResponse(
   credentials: CodexCredentials,
 ): Promise<Response> {
   validateRequest(incoming);
-  const replay = incoming.clone();
+  // Cloudflare's Request clone preserves an internal generic metadata parameter which is
+  // irrelevant across this package's constrained transport boundary.
+  const replay = incoming.clone() as Request;
   const current = await credentials.accessToken();
   const first = await http(makeAuthenticatedCodexRequest(incoming, current.token, current.accountId));
   if (first.status !== 401) return first;
