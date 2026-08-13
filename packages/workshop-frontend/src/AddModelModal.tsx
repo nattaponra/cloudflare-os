@@ -7,7 +7,7 @@ import { AuthenticatedApi } from '@gadgets/workshop-shared/api'
 interface AddModelModalProps {
   visible: boolean
   onCancel: () => void
-  onSuccess: () => void
+  onSuccess: (provider: AiModelProvider) => void
   authenticatedApi: RpcStub<AuthenticatedApi>
   aiConfig: AiGatewayInfo | null
   codexAvailable?: boolean
@@ -207,7 +207,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
         }
         popup.location.href = target.href
         toasts.add({ title: 'Finish connecting in the OpenAI window', variant: 'success' })
-        onSuccess()
+        onSuccess('openai-codex')
       } catch (error) {
         popup.close()
         console.error('Failed to connect Codex:', error)
@@ -240,7 +240,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
 
       await authenticatedApi.addModel(profile, config)
       toasts.add({ title: 'AI model added successfully', variant: 'success' })
-      onSuccess()
+      onSuccess(selection!.provider)
     } catch (error: any) {
       console.error('Failed to add model:', error)
       toasts.add({ title: 'Failed to add model', variant: 'error' })

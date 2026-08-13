@@ -382,9 +382,11 @@ function ProvidersPage() {
       <AddModelModal
         visible={sheetOpen}
         onCancel={() => setSheetOpen(false)}
-        onSuccess={() => {
+        onSuccess={(provider) => {
           setSheetOpen(false)
-          if (codexStatus.available && !codexStatus.connected) setCodexConnecting(true)
+          if (provider === 'openai-codex' && codexStatus.available && !codexStatus.connected) {
+            setCodexConnecting(true)
+          }
           fetchAll()
         }}
         authenticatedApi={authenticatedApi}

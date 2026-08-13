@@ -5,6 +5,7 @@ import { useAuthenticatedApi } from './AuthContext'
 import {
   AiChatAuthorInfo,
   AiGatewayInfo,
+  CodexProviderStatus,
 } from '@gadgets/workshop-shared/api'
 import {
   VendorDescription,
@@ -85,6 +86,11 @@ export default function OnboardingWizard({
   const [models, setModels] = useState<AiChatAuthorInfo[]>([])
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
   const [aiConfig, setAiConfig] = useState<AiGatewayInfo | null>(null)
+  const [codexStatus, setCodexStatus] = useState<CodexProviderStatus>({
+    available: false,
+    connected: false,
+  })
+  const [codexConnecting, setCodexConnecting] = useState(false)
   const [addModelOpen, setAddModelOpen] = useState(false)
   const [modelsLoading, setModelsLoading] = useState(true)
 
@@ -117,12 +123,14 @@ export default function OnboardingWizard({
   // Load models + AI config
   const fetchModels = useCallback(async () => {
     try {
-      const [modelList, cfg] = await Promise.all([
+      const [modelList, cfg, codex] = await Promise.all([
         authenticatedApi.listModels(),
         authenticatedApi.getAiConfig(),
+        authenticatedApi.getCodexProviderStatus(),
       ])
       setModels(modelList)
       setAiConfig(cfg)
+      setCodexStatus(codex)
       // Default to the first model in the list
       if (modelList.length > 0) {
         setSelectedModelId((prev) => prev ?? modelList[0].id)
@@ -137,6 +145,18 @@ export default function OnboardingWizard({
   useEffect(() => {
     fetchModels()
   }, [fetchModels])
+
+  // Device authorization completes in the OpenAI tab. Refresh the live account catalog until the
+  // connected account appears, then the newly discovered models become selectable here.
+  useEffect(() => {
+    if (!codexConnecting || !codexStatus.available || codexStatus.connected) return
+    const timer = window.setInterval(() => { void fetchModels() }, 4_000)
+    return () => window.clearInterval(timer)
+  }, [codexConnecting, codexStatus.available, codexStatus.connected, fetchModels])
+
+  useEffect(() => {
+    if (codexStatus.connected) setCodexConnecting(false)
+  }, [codexStatus.connected])
 
   // Load vendors and subscribe to connected accounts.
   // We use a url→vendorId lookup map (built from listGatekeeperVendors) so the
@@ -715,12 +735,16 @@ export default function OnboardingWizard({
     <AddModelModal
       visible={addModelOpen}
       onCancel={() => setAddModelOpen(false)}
-      onSuccess={() => {
+      onSuccess={(provider) => {
         setAddModelOpen(false)
+        if (provider === 'openai-codex' && codexStatus.available && !codexStatus.connected) {
+          setCodexConnecting(true)
+        }
         fetchModels()
       }}
       authenticatedApi={authenticatedApi}
       aiConfig={aiConfig}
+      codexAvailable={codexStatus.available}
     />
     </>
   )
