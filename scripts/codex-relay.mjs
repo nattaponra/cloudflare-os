@@ -4,8 +4,8 @@ import { pathToFileURL } from "node:url";
 const RELAY_PREFIX = "/v1/codex/";
 const UPSTREAM_PREFIX = "https://chatgpt.com/backend-api/codex/";
 const FORWARDED_REQUEST_HEADERS = new Set([
-  "accept", "authorization", "chatgpt-account-id", "content-type", "openai-beta",
-  "originator", "session_id", "user-agent", "x-client-request-id",
+  "accept", "authorization", "chatgpt-account-id", "content-encoding", "content-type",
+  "openai-beta", "originator", "session-id", "user-agent", "x-client-request-id",
 ]);
 const BLOCKED_RESPONSE_HEADERS = new Set([
   "connection", "content-encoding", "content-length", "set-cookie", "transfer-encoding",

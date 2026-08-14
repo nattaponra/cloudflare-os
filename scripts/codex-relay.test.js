@@ -77,3 +77,33 @@ test("Codex relay preserves streaming response bodies without account cookies", 
   assert.equal(response.headers.has("Content-Encoding"), false);
   assert.equal(await response.text(), "data: ok\n\n");
 });
+
+test("Codex relay preserves Codex request transport metadata", async () => {
+  let forwarded;
+  const upstream = async request => {
+    forwarded = request;
+    return new Response("data: ok\n\n", {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  };
+  const handle = createCodexRelayHandler({ token: TOKEN, upstream });
+  const compressedBody = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd]);
+
+  const response = await handle(new Request("http://localhost:9911/v1/codex/responses", {
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Encoding": "zstd",
+      "Content-Type": "application/json",
+      "Session-Id": "session-123",
+      "X-Client-Request-Id": "request-123",
+      "X-Codex-Relay-Token": TOKEN,
+    },
+    body: compressedBody,
+  }));
+
+  assert.equal(response.status, 200);
+  assert.equal(forwarded.headers.get("Content-Encoding"), "zstd");
+  assert.equal(forwarded.headers.get("Session-Id"), "session-123");
+  assert.deepEqual(new Uint8Array(await forwarded.arrayBuffer()), compressedBody);
+});
